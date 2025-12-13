@@ -47,6 +47,8 @@ def utf8_response(data: dict):
         content=data,
         headers={
             "Content-Type": "application/json; charset=utf-8",  # 强制指定UTF-8
+            "Access-Control-Allow-Headers": "*",
+            "Access-Control-Allow-Methods": "*",
             "Access-Control-Allow-Origin": "*"  # 兜底跨域头
         }
     )
@@ -93,14 +95,22 @@ def decrypt_code(encrypt_code: str) -> tuple:
 # ---------------------- FastAPI + 跨域配置（强化UTF-8兼容） ----------------------
 app = FastAPI(title="激活码管理系统", docs_url="/docs")
 
+origins = [
+    "https://3guys.com.cn",       # 后端域名
+    "https://login.3guys.com.cn", # 前端登录页域名
+    "http://localhost:8080",      # 本地开发环境（可选）
+    "http://192.168.3.111:8080"       # 本地开发环境（可选）
+]
+
 # 修复CORS：确保覆盖所有源、方法、头，且中间件优先加载
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # 开发环境允许所有源（包括5175/5173等任意端口）
-    allow_credentials=True,
-    allow_methods=["GET", "POST", "OPTIONS", "DELETE", "PUT"],  # 显式列出所有请求方法
-    allow_headers=["*"],  # 允许所有请求头（包括Authorization等）
-    expose_headers=["*"],  # 新增：暴露所有响应头
+    allow_origins=origins,                # 显式指定允许的源（替代通配符，解决浏览器兼容）
+    allow_credentials=True,              # 允许携带 Cookie/token
+    allow_methods=["*"],                 # 允许所有请求方法（GET/POST/OPTIONS 等）
+    allow_headers=["*"],                 # 允许所有请求头
+    expose_headers=["*"],                # 暴露所有响应头
+    max_age=3600                         # 预检请求缓存时间（减少 OPTIONS 请求次数）
 )
 
 # 在CORS配置后新增：处理所有OPTIONS预检请求，返回UTF-8编码
