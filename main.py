@@ -113,6 +113,18 @@ app.add_middleware(
     max_age=3600                         # 预检请求缓存时间（减少 OPTIONS 请求次数）
 )
 
+# 第二步：全局中间件（强制添加跨域头，兜底）
+@app.middleware("http")
+async def add_cors_headers(request, call_next):
+    response = await call_next(request)
+    # 强制指定允许login.3guys.com.cn跨域
+    response.headers["Access-Control-Allow-Origin"] = "https://login.3guys.com.cn"
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS, DELETE, PUT"
+    response.headers["Access-Control-Allow-Headers"] = "*"
+    response.headers["Access-Control-Allow-Credentials"] = "true"
+    response.headers["Content-Type"] = "application/json; charset=utf-8"
+    return response
+
 # 在CORS配置后新增：处理所有OPTIONS预检请求，返回UTF-8编码
 @app.options("/{path:path}")
 async def handle_options(path: str):
