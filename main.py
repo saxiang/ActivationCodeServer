@@ -179,7 +179,7 @@ def verify_code(code: str, db: Session = Depends(get_db)):
     return {"status": True, "msg": "激活码有效"}
 
 # 4. 激活激活码接口
-@app.post("/activate_code")
+@app.get("/activate_code")
 def activate_code(code: str, db: Session = Depends(get_db)):
     ac = db.query(ActivationCode).filter(ActivationCode.code == code).first()
     if not ac:
