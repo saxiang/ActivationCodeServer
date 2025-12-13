@@ -3,6 +3,7 @@ import base64
 from fastapi import FastAPI, HTTPException, Depends, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse  # 新增：统一JSON响应，强制UTF-8
+from fastapi import Form, Request
 from sqlalchemy import create_engine, Column, String, Boolean, DateTime, Integer, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
@@ -132,7 +133,7 @@ async def handle_options(path: str):
 
 # ---------------------- 核心接口（全部替换为utf8_response，强制UTF-8） ----------------------
 # 初始化管理员账号
-@app.get("/api/init_admin")
+@app.get("/init_admin")
 def init_admin(db: Session = Depends(get_db)):
     def hash_password(pwd):
         return bcrypt.hashpw(pwd.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")  # 强制UTF-8
@@ -157,7 +158,7 @@ def init_admin(db: Session = Depends(get_db)):
         return utf8_response({"msg": f"管理员账号已存在或创建失败：{str(e)}"})
 
 # 修复login接口
-@app.post("/api/login")
+@app.post("/login")
 def login(username: str = Form(...), password: str = Form(...), db: Session = Depends(get_db)):
     # 修复：execute + text()
     user = db.execute(
@@ -171,7 +172,7 @@ def login(username: str = Form(...), password: str = Form(...), db: Session = De
     return utf8_response({"access_token": username, "token_type": "bearer"})
 
 # 生成激活码接口（自定义加密逻辑）
-@app.post("/api/generate_codes")
+@app.post("/generate_codes")
 def generate_codes(product_id: str = Form(...), phone: str = Form(...), db: Session = Depends(get_db)):
     # 校验产品编号（3位数字）
     if not product_id.isdigit() or len(product_id) != 3:
@@ -208,7 +209,7 @@ def generate_codes(product_id: str = Form(...), phone: str = Form(...), db: Sess
     return utf8_response({"code": final_code, "msg": "激活码生成成功"})
 
 # 解密激活码接口
-@app.post("/api/decrypt_code")
+@app.post("/decrypt_code")
 def decrypt_code_api(code: str = Form(...)):
     try:
         product_id, phone = decrypt_code(code)
@@ -217,7 +218,7 @@ def decrypt_code_api(code: str = Form(...)):
         return utf8_response({"detail": str(e)}), 400
 
 # 3. 验证激活码接口（iOS App调用）
-@app.get("/api/verify_code")
+@app.get("/verify_code")
 def verify_code(code: str, db: Session = Depends(get_db)):
     ac = db.query(ActivationCode).filter(ActivationCode.code == code).first()
     if not ac:
@@ -242,7 +243,7 @@ def activate_code(code: str, db: Session = Depends(get_db)):
     return utf8_response({"status": True, "msg": "激活成功"})
 
 # 5.重置激活状态接口
-@app.post("/api/reset_activation")  
+@app.post("/reset_activation")  
 def reset_activation(code: str = Form(...), db: Session = Depends(get_db)):
     # 1. 根据激活码字符串查询
     activation_code = db.query(ActivationCode).filter(ActivationCode.code == code).first()
@@ -262,7 +263,7 @@ def reset_activation(code: str = Form(...), db: Session = Depends(get_db)):
     return utf8_response({"msg": f"激活码【{code}】已重置为未激活状态", "code": code})
 
 # 6.删除激活码接口
-@app.post("/api/delete_code")
+@app.post("/delete_code")
 def delete_code(code: str = Form(...), db: Session = Depends(get_db)):
     # 1. 校验激活码是否存在
     activation_code = db.query(ActivationCode).filter(ActivationCode.code == code).first()
@@ -280,7 +281,7 @@ def delete_code(code: str = Form(...), db: Session = Depends(get_db)):
     return utf8_response({"msg": f"激活码【{code}】已成功删除"})
 
 # 获取激活码列表（修复时间格式化乱码）
-@app.get("/api/get_codes")
+@app.get("/get_codes")
 def get_codes(page: int = 1, size: int = 20, db: Session = Depends(get_db)):
     # 修复：总数量查询
     total = db.execute(text("SELECT COUNT(*) FROM activation_codes")).scalar()
@@ -310,6 +311,6 @@ def get_codes(page: int = 1, size: int = 20, db: Session = Depends(get_db)):
     return utf8_response({"total": total, "list": data})
 
 # 退出登录（空接口，前端处理）
-@app.get("/api/logout")
+@app.get("/logout")
 def logout():
     return utf8_response({"msg": "退出成功"})
