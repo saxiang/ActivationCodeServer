@@ -12,6 +12,19 @@ import bcrypt
 import datetime
 import uuid
 
+# 时间格式化工具函数：兼容字符串/DateTime/None
+def format_datetime(dt):
+    if dt is None:
+        return ""
+    # 如果是字符串，直接返回（不管格式，避免依赖re）
+    if isinstance(dt, str):
+        return dt if dt.strip() else ""
+    # 如果是DateTime对象，格式化
+    if isinstance(dt, datetime.datetime):
+        return dt.strftime("%Y-%m-%d %H:%M:%S")
+    # 其他类型，返回空
+    return ""
+
 # ---------------------- 数据库配置（修复：删除无效的encoding参数） ----------------------
 # 保留charset=utf8确保SQLite读写中文UTF-8编码，删除create_engine的encoding参数
 SQLALCHEMY_DATABASE_URL = "sqlite:///./db.sqlite3?charset=utf8"
@@ -228,7 +241,7 @@ def verify_code(code: str, db: Session = Depends(get_db)):
     return utf8_response({"status": True, "msg": "激活码有效"})
 
 # 4. 激活激活码接口（兼容GET/POST，UTF-8响应）
-@app.api_route("/api/activate_code", methods=["GET", "POST"])
+@app.api_route("/activate_code", methods=["GET", "POST"])
 def activate_code(code: str, db: Session = Depends(get_db)):
     ac = db.query(ActivationCode).filter(ActivationCode.code == code).first()
     if not ac:
@@ -282,35 +295,43 @@ def delete_code(code: str = Form(...), db: Session = Depends(get_db)):
 
 # 获取激活码列表（修复时间格式化乱码）
 @app.get("/get_codes")
-def get_codes(page: int = 1, size: int = 20, db: Session = Depends(get_db)):
-    # 修复：总数量查询
-    total = db.execute(text("SELECT COUNT(*) FROM activation_codes")).scalar()
-    # 修复：分页数据查询
-    codes = db.execute(
-        text("""
-            SELECT id, code, raw_data, is_activated, activate_time, create_time
-            FROM activation_codes
-            LIMIT :size OFFSET :offset
-        """),
-        {"size": size, "offset": (page-1)*size}
-    ).fetchall()
-    # 格式化返回（修复时间字段编码/空值问题）
-    data = []
-    for c in codes:
-        # 时间字段格式化，空值转为空字符串，避免编码异常
-        activate_time = c[4].strftime("%Y-%m-%d %H:%M:%S") if c[4] else ""
-        create_time = c[5].strftime("%Y-%m-%d %H:%M:%S") if c[5] else ""
-        data.append({
-            "id": c[0],
-            "code": c[1],
-            "raw_data": c[2] or "",
-            "is_activated": bool(c[3]),
-            "activate_time": activate_time,
-            "create_time": create_time
-        })
-    return utf8_response({"total": total, "list": data})
+def get_codes(page: int = 1, size: int = 10, db: Session = Depends(get_db)):
+    try:
+        page = max(1, page)
+        size = max(1, min(100, size))
+        # 查询总数
+        total = db.execute(text("SELECT COUNT(*) FROM activation_codes")).scalar() or 0
+        # 查询列表
+        codes = db.execute(
+            text("""
+                SELECT id, code, raw_data, is_activated, activate_time, create_time
+                FROM activation_codes
+                LIMIT :size OFFSET :offset
+            """),
+            {"size": size, "offset": (page-1)*size}
+        ).fetchall()
+        # 格式化数据（无re依赖）
+        data = []
+        for c in codes:
+            data.append({
+                "id": c[0] if c[0] else "",
+                "code": c[1] if c[1] else "",
+                "raw_data": c[2] if c[2] else "",
+                "is_activated": bool(c[3]) if c[3] is not None else False,
+                "activate_time": format_datetime(c[4]),
+                "create_time": format_datetime(c[5])
+            })
+        return utf8_response({"total": total, "list": data})
+    except Exception as e:
+        print(f"get_codes错误：{str(e)}")
+        return utf8_response({"detail": f"查询失败：{str(e)}"}), 500
 
 # 退出登录（空接口，前端处理）
 @app.get("/logout")
 def logout():
     return utf8_response({"msg": "退出成功"})
+
+# 测试接口：验证服务是否正常
+@app.get("/health")
+def health():
+    return utf8_response({"status": "ok", "msg": "服务正常运行"})
