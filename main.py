@@ -1,0 +1,261 @@
+# 新增Base64和解密相关依赖
+import base64
+from fastapi import FastAPI, HTTPException, Depends, Form
+from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import create_engine, Column, String, Boolean, DateTime, Integer, text
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker, Session
+
+import bcrypt
+import datetime
+import uuid
+
+# ---------------------- 数据库配置 ----------------------
+SQLALCHEMY_DATABASE_URL = "sqlite:///./db.sqlite3"
+engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False})
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+Base = declarative_base()
+
+class AdminUser(Base):  # 新增：管理员表模型
+    __tablename__ = "admin_users"
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(String, unique=True, nullable=False)
+    password_hash = Column(String, nullable=False)
+
+# 激活码表（保留原有字段，激活码为自定义加密码）
+class ActivationCode(Base):
+    __tablename__ = "activation_codes"
+    id = Column(Integer, primary_key=True, index=True)
+    code = Column(String, unique=True, index=True)  # 存储最终加密后的激活码
+    raw_data = Column(String)  # 存储原始拼接字符串（产品编号+手机号），方便解密
+    is_activated = Column(Boolean, default=False)
+    activate_time = Column(DateTime, nullable=True)
+    create_time = Column(DateTime, default=datetime.datetime.now)
+
+Base.metadata.create_all(bind=engine)
+
+# ---------------------- FastAPI + 跨域配置 ----------------------
+# ---------------------- FastAPI + 跨域配置（必须是第一个中间件） ----------------------
+app = FastAPI(title="激活码管理系统", docs_url="/docs")
+
+# 修复CORS：确保覆盖所有源、方法、头，且中间件优先加载
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # 开发环境允许所有源（包括5175/5173等任意端口）
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "OPTIONS", "DELETE", "PUT"],  # 显式列出所有请求方法
+    allow_headers=["*"],  # 允许所有请求头（包括Authorization等）
+    expose_headers=["*"],  # 新增：暴露所有响应头
+)
+# 在CORS配置后新增：处理所有OPTIONS预检请求
+@app.options("/{path:path}")
+async def handle_options(path: str):
+    return {"status": "ok"}
+
+# ---------------------- 工具函数 ----------------------
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+# 后端加密函数（和前端保持一致，双重验证）
+def encrypt_code(product_id: str, phone: str) -> str:
+    # 1. 拼接原始字符串
+    raw_str = product_id + phone
+    # 2. 第一层Base64编码
+    first_b64 = base64.b64encode(raw_str.encode("utf-8")).decode("utf-8")
+    # 3. 加盐（尾部加9527）
+    salted_str = first_b64 + "9527"
+    # 4. 第二层Base64编码
+    final_code = base64.b64encode(salted_str.encode("utf-8")).decode("utf-8")
+    return final_code, raw_str
+
+# 后端解密函数
+def decrypt_code(encrypt_code: str) -> tuple:
+    try:
+        # 1. 解第二层Base64
+        second_decode = base64.b64decode(encrypt_code.encode("utf-8")).decode("utf-8")
+        # 2. 去盐（去掉尾部9527）
+        if not second_decode.endswith("9527"):
+            raise ValueError("激活码格式错误（无加盐标识）")
+        first_b64 = second_decode[:-4]  # 9527是4位，截取前面部分
+        # 3. 解第一层Base64
+        raw_str = base64.b64decode(first_b64.encode("utf-8")).decode("utf-8")
+        # 4. 拆分：前3位=产品编号，剩余=手机号
+        if len(raw_str) < 3:
+            raise ValueError("激活码解析失败（原始数据过短）")
+        product_id = raw_str[:3]
+        phone = raw_str[3:]
+        return product_id, phone
+    except Exception as e:
+        raise ValueError(f"解密失败：{str(e)}")
+
+# ---------------------- 核心接口 ----------------------
+# 初始化管理员账号
+@app.get("/init_admin")
+def init_admin(db: Session = Depends(get_db)):
+    def hash_password(pwd):
+        return bcrypt.hashpw(pwd.encode(), bcrypt.gensalt()).decode()
+    try:
+        # 修复：execute + text()
+        db.execute(
+            text("INSERT INTO admin_users (username, password_hash) VALUES ('admin', :pwd)"),
+            {"pwd": hash_password("123456")}
+        )
+        db.commit()
+        return {"msg": "管理员账号创建成功：admin/123456"}
+    except Exception as e:  # 替换IntegrityError为通用异常（简化）
+        return {"msg": "管理员账号已存在"}
+
+# 修复login接口
+@app.post("/login")
+def login(username: str = Form(...), password: str = Form(...), db: Session = Depends(get_db)):
+    # 修复：execute + text()
+    user = db.execute(
+        text("SELECT * FROM admin_users WHERE username = :un"),
+        {"un": username}
+    ).first()
+    if not user:
+        raise HTTPException(401, "账号不存在")
+    if not bcrypt.checkpw(password.encode(), user[2].encode()):
+        raise HTTPException(401, "密码错误")
+    return {"access_token": username, "token_type": "bearer"}
+
+# 生成激活码接口（自定义加密逻辑）
+@app.post("/generate_codes")
+def generate_codes(product_id: str = Form(...), phone: str = Form(...), db: Session = Depends(get_db)):
+    # 校验产品编号（3位数字）
+    if not product_id.isdigit() or len(product_id) != 3:
+        raise HTTPException(400, "产品编号必须为3位数字")
+    # 校验手机号（11位数字）
+    if not phone.isdigit() or len(phone) != 11:
+        raise HTTPException(400, "手机号码必须为11位数字")
+    
+    # 生成加密激活码
+    final_code, raw_str = encrypt_code(product_id, phone)
+    
+    # 修复：原生SQL查询用execute + text()（原错误行）
+    exist = db.execute(
+        text("SELECT 1 FROM activation_codes WHERE code = :c"),  # text包裹SQL
+        {"c": final_code}
+    ).first()
+    if exist:
+        raise HTTPException(400, "该激活码已存在")
+    
+    # 修复：插入数据也用execute + text()
+    db.execute(
+        text("""
+            INSERT INTO activation_codes (code, raw_data, is_activated, create_time)
+            VALUES (:code, :raw, 0, :ct)
+        """),
+        {
+            "code": final_code,
+            "raw": raw_str,
+            "ct": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
+    )
+    db.commit()
+    return {"code": final_code, "msg": "激活码生成成功"}
+
+# 解密激活码接口
+@app.post("/decrypt_code")
+def decrypt_code_api(code: str = Form(...)):
+    try:
+        product_id, phone = decrypt_code(code)
+        return {"product_id": product_id, "phone": phone, "msg": "解密成功"}
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+# 3. 验证激活码接口（iOS App调用）
+@app.get("/verify_code")
+def verify_code(code: str, db: Session = Depends(get_db)):
+    ac = db.query(ActivationCode).filter(ActivationCode.code == code).first()
+    if not ac:
+        return {"status": False, "msg": "激活码不存在"}
+    if ac.is_activated:
+        return {"status": False, "msg": "激活码已使用"}
+    return {"status": True, "msg": "激活码有效"}
+
+# 4. 激活激活码接口
+@app.post("/activate_code")
+def activate_code(code: str, db: Session = Depends(get_db)):
+    ac = db.query(ActivationCode).filter(ActivationCode.code == code).first()
+    if not ac:
+        raise HTTPException(status_code=404, detail="激活码不存在")
+    if ac.is_activated:
+        raise HTTPException(status_code=400, detail="激活码已激活")
+    # 标记为已激活
+    ac.is_activated = True
+    ac.activate_time = datetime.datetime.now()
+    db.commit()
+    return {"status": True, "msg": "激活成功"}
+
+# 5.重置激活状态接口
+@app.post("/reset_activation")  
+def reset_activation(code: str = Form(...), db: Session = Depends(get_db)):
+    # 1. 根据激活码字符串查询
+    activation_code = db.query(ActivationCode).filter(ActivationCode.code == code).first()
+    if not activation_code:
+        raise HTTPException(status_code=400, detail="激活码不存在")
+    
+    # 2. 校验是否为已激活状态
+    if not activation_code.is_activated:
+        raise HTTPException(status_code=400, detail="该激活码已是未激活状态，无需重置")
+    
+    # 3. 重置状态：未激活 + 清空激活时间
+    activation_code.is_activated = False
+    activation_code.activate_time = None
+    db.commit()
+    db.refresh(activation_code)
+    
+    return {"msg": f"激活码【{code}】已重置为未激活状态", "code": code}
+
+# 6.删除激活码接口
+@app.post("/delete_code")
+def delete_code(code: str = Form(...), db: Session = Depends(get_db)):
+    # 1. 校验激活码是否存在
+    activation_code = db.query(ActivationCode).filter(ActivationCode.code == code).first()
+    if not activation_code:
+        raise HTTPException(status_code=400, detail="激活码不存在")
+    
+    # 2. 可选：禁止删除已激活的激活码（根据业务需求调整，如需允许则注释此行）
+    if activation_code.is_activated:
+        raise HTTPException(status_code=400, detail="禁止删除已激活的激活码")
+    
+    # 3. 删除激活码
+    db.delete(activation_code)
+    db.commit()
+    
+    return {"msg": f"激活码【{code}】已成功删除"}
+
+# 获取激活码列表
+@app.get("/get_codes")
+def get_codes(page: int = 1, size: int = 20, db: Session = Depends(get_db)):
+    # 修复：总数量查询
+    total = db.execute(text("SELECT COUNT(*) FROM activation_codes")).scalar()
+    # 修复：分页数据查询
+    codes = db.execute(
+        text("""
+            SELECT id, code, raw_data, is_activated, activate_time, create_time
+            FROM activation_codes
+            LIMIT :size OFFSET :offset
+        """),
+        {"size": size, "offset": (page-1)*size}
+    ).fetchall()
+    # 格式化返回（原有逻辑不变）
+    data = [{
+        "id": c[0],
+        "code": c[1],
+        "raw_data": c[2] or "",
+        "is_activated": bool(c[3]),
+        "activate_time": c[4] or "",
+        "create_time": c[5] or ""
+    } for c in codes]
+    return {"total": total, "list": data}
+
+# 退出登录（空接口，前端处理）
+@app.get("/logout")
+def logout():
+    return {"msg": "退出成功"}
