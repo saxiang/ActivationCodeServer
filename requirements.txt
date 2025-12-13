@@ -1,7 +1,7 @@
-# 核心依赖（锁定兼容版本）
-fastapi==0.109.2  # 经测试适配Python 3.12，无recursive_guard报错
-uvicorn[standard]==0.27.0  # 与FastAPI兼容
-pydantic==1.10.14  # 避开2.x的兼容问题，适配3.12
+# 核心：FastAPI 0.110.0+ 原生支持 Pydantic 2.x，解决递归引用参数问题
+fastapi==0.110.0
+uvicorn[standard]==0.27.0  # 与FastAPI 0.110兼容
+pydantic==2.6.4  # 2.x版本彻底重构ForwardRef，无recursive_guard报错
 bcrypt==4.0.1  # 密码加密
 sqlalchemy==2.0.29  # 数据库
 python-multipart==0.0.7  # 表单处理
