@@ -12,6 +12,10 @@ import bcrypt
 import datetime
 import uuid
 
+# 【DB改动1】：新增PostgreSQL兼容的时区处理（可选，避免时间差）
+from sqlalchemy.sql import func
+import os
+
 # 时间格式化工具函数：兼容字符串/DateTime/None
 def format_datetime(dt):
     if dt is None:
@@ -27,30 +31,55 @@ def format_datetime(dt):
 
 # ---------------------- 数据库配置（修复：删除无效的encoding参数） ----------------------
 # 保留charset=utf8确保SQLite读写中文UTF-8编码，删除create_engine的encoding参数
-SQLALCHEMY_DATABASE_URL = "sqlite:///./db.sqlite3?charset=utf8"
+# SQLALCHEMY_DATABASE_URL = "sqlite:///./db.sqlite3?charset=utf8"
+# 【db改动2】：替换为Render PostgreSQL的Internal Database URL（注意替换成你自己的！）
+if os.getenv("ENVIRONMENT") == "production":
+    # Render部署环境：读取Render的环境变量
+    SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL")
+else:
+    # 本地开发环境：硬编码Render PostgreSQL的External URL
+    SQLALCHEMY_DATABASE_URL = "postgresql://codedb_2qoi_user:FtEeP5y8etf9sH5yTvb78wipSDUtafC3@dpg-d4upuqruibrs73f51flg-a.singapore-postgres.render.com/codedb_2qoi"
+
+# 兜底校验：防止URL为空
+if not SQLALCHEMY_DATABASE_URL:
+    raise ValueError("DATABASE_URL未配置！本地请检查硬编码URL，Render请检查环境变量")
+# engine = create_engine(
+#     SQLALCHEMY_DATABASE_URL,
+#     connect_args={"check_same_thread": False}  # 仅保留SQLite必需参数
+# )
+# 【改动3】：创建PostgreSQL引擎（去掉SQLite的connect_args）
 engine = create_engine(
     SQLALCHEMY_DATABASE_URL,
-    connect_args={"check_same_thread": False}  # 仅保留SQLite必需参数
+    # PostgreSQL无需check_same_thread，删除该参数
+    pool_pre_ping=True  # 可选：防止连接超时，增强稳定性
 )
+
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
 class AdminUser(Base):  # 新增：管理员表模型
     __tablename__ = "admin_users"
     id = Column(Integer, primary_key=True, index=True)
-    username = Column(String, unique=True, nullable=False)
-    password_hash = Column(String, nullable=False)
+    # username = Column(String, unique=True, nullable=False)
+    # password_hash = Column(String, nullable=False)
+     # 【db改动5】：PostgreSQL的String建议指定长度（避免默认无限长度）
+    username = Column(String(50), unique=True, nullable=False)
+    password_hash = Column(String(255), nullable=False)
 
 # 激活码表（保留原有字段，激活码为自定义加密码）
 class ActivationCode(Base):
     __tablename__ = "activation_codes"
     id = Column(Integer, primary_key=True, index=True)
-    code = Column(String, unique=True, index=True)  # 存储最终加密后的激活码
-    raw_data = Column(String)  # 存储原始拼接字符串（产品编号+手机号），方便解密
+    # code = Column(String, unique=True, index=True)  # 存储最终加密后的激活码
+    # raw_data = Column(String)  # 存储原始拼接字符串（产品编号+手机号），方便解密
+    code = Column(String(255), unique=True, index=True)  # 【db改动6】：指定长度
+    raw_data = Column(String(255))  # 【db改动7】：指定长度
     is_activated = Column(Boolean, default=False)
     activate_time = Column(DateTime, nullable=True)
     # 核心修改：datetime默认值强制UTC+8，格式化避免乱码
-    create_time = Column(DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc))
+    # create_time = Column(DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc))
+    # 【改动8】：PostgreSQL推荐用func.now()作为默认时间（兼容时区）
+    create_time = Column(DateTime, default=func.now())
 
 Base.metadata.create_all(bind=engine)
 
@@ -250,16 +279,18 @@ def generate_codes(product_id: str = Form(...), phone: str = Form(...), db: Sess
         return utf8_response({"detail": "该激活码已存在"}, status_code=400)
     
     # 修复：插入数据也用execute + text()，时间格式化避免乱码
-    current_time = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    # current_time = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    beijing_tz = datetime.timezone(datetime.timedelta(hours=8))
+    current_beijing_time = datetime.datetime.now(beijing_tz).strftime("%Y-%m-%d %H:%M:%S")
     db.execute(
         text("""
             INSERT INTO activation_codes (code, raw_data, is_activated, create_time)
-            VALUES (:code, :raw, 0, :ct)
+            VALUES (:code, :raw, false, :ct)
         """),
         {
             "code": final_code,
             "raw": raw_str,
-            "ct": current_time
+            "ct": current_beijing_time
         }
     )
     db.commit()
@@ -294,7 +325,9 @@ def activate_code(code: str, db: Session = Depends(get_db)):
         return utf8_response({"detail": "激活码已激活"}, status_code=400)
     # 标记为已激活，时间强制UTC+8
     ac.is_activated = True
-    ac.activate_time = datetime.datetime.now(datetime.timezone.utc)
+    beijing_tz = datetime.timezone(datetime.timedelta(hours=8))  # 东八区时区对象
+    ac.activate_time = datetime.datetime.now(beijing_tz).strftime("%Y-%m-%d %H:%M:%S")  # 北京时间
+
     db.commit()
     db.refresh(ac)
     # 激活成功返回200（默认）

@@ -5,3 +5,6 @@ pydantic==2.6.4  # 2.x版本彻底重构ForwardRef，无recursive_guard报错
 bcrypt==4.0.1  # 密码加密
 sqlalchemy==2.0.29  # 数据库
 python-multipart==0.0.7  # 表单处理
+
+# 【db改动新增】PostgreSQL驱动（必须）
+psycopg2-binary>=2.9.9
