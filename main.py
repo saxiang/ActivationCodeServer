@@ -172,16 +172,41 @@ def init_admin(db: Session = Depends(get_db)):
 
 # 修复login接口
 @app.post("/login")
-def login(username: str = Form(...), password: str = Form(...), db: Session = Depends(get_db)):
-    # 修复：execute + text()
+async def login(request: Request, db: Session = Depends(get_db)):
+    # 步骤1：解析参数（兼容Form/JSON），空值直接返回失败
+    try:
+        data = await request.form()
+        username = data.get("username", "").strip()
+        password = data.get("password", "").strip()
+    except:
+        try:
+            data = await request.json()
+            username = data.get("username", "").strip()
+            password = data.get("password", "").strip()
+        except:
+            # 保留utf8_response，直接返回失败（终止流程）
+            return utf8_response({"detail": "参数格式错误（仅支持Form/JSON）"})
+    
+    # 步骤2：空值校验（终止流程）
+    if not username or not password:
+        return utf8_response({"detail": "账号/密码不能为空"})
+    
+    # 步骤3：查询用户（账号不存在则返回失败，终止流程）
     user = db.execute(
-        text("SELECT * FROM admin_users WHERE username = :un"),
+        text("SELECT id, username, password_hash FROM admin_users WHERE username = :un"),
         {"un": username}
     ).first()
     if not user:
-        return utf8_response({"detail": "账号不存在"}), 401  # 统一UTF-8响应
-    if not bcrypt.checkpw(password.encode("utf-8"), user[2].encode("utf-8")):
-        return utf8_response({"detail": "密码错误"}), 401
+        return utf8_response({"detail": "账号不存在"})
+    
+    # 步骤4：密码校验（失败则返回失败，终止流程）
+    # user[2] 是数据库中存储的密码哈希值
+    password_hash = user[2]
+    if not bcrypt.checkpw(password.encode("utf-8"), password_hash.encode("utf-8")):
+        # 密码错误：仅返回utf8_response，不执行后续逻辑
+        return utf8_response({"detail": "密码错误"})
+    
+    # 步骤5：只有所有校验通过，才返回token（唯一成功分支）
     return utf8_response({"access_token": username, "token_type": "bearer"})
 
 # 生成激活码接口（自定义加密逻辑）
