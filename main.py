@@ -37,7 +37,7 @@ SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL")
 
 # 本地开发兜底（仅本地生效，Render部署时不会执行这行）
 if not SQLALCHEMY_DATABASE_URL:
-    SQLALCHEMY_DATABASE_URL = "postgresql://codedb_2qoi_user:FtEeP5y8etf9sH5yTvb78wipSDUtafC3@dpg-d4upuqruibrs73f51flg-a.singapore-postgres.render.com/codedb_2qoi" 
+    SQLALCHEMY_DATABASE_URL = "postgresql://neondb_owner:npg_vBNF4s5myUuE@ep-curly-wind-a1fnfd0a-pooler.ap-southeast-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require" 
 
 # 兜底校验：防止URL为空
 if not SQLALCHEMY_DATABASE_URL:
