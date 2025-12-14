@@ -33,12 +33,11 @@ def format_datetime(dt):
 # 保留charset=utf8确保SQLite读写中文UTF-8编码，删除create_engine的encoding参数
 # SQLALCHEMY_DATABASE_URL = "sqlite:///./db.sqlite3?charset=utf8"
 # 【db改动2】：替换为Render PostgreSQL的Internal Database URL（注意替换成你自己的！）
-if os.getenv("ENVIRONMENT") == "production":
-    # Render部署环境：读取Render的环境变量
-    SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL")
-else:
-    # 本地开发环境：硬编码Render PostgreSQL的External URL
-    SQLALCHEMY_DATABASE_URL = "postgresql://codedb_2qoi_user:FtEeP5y8etf9sH5yTvb78wipSDUtafC3@dpg-d4upuqruibrs73f51flg-a.singapore-postgres.render.com/codedb_2qoi"
+SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL")
+
+# 本地开发兜底（仅本地生效，Render部署时不会执行这行）
+if not SQLALCHEMY_DATABASE_URL:
+    SQLALCHEMY_DATABASE_URL = "postgresql://codedb_2qoi_user:FtEeP5y8etf9sH5yTvb78wipSDUtafC3@dpg-d4upuqruibrs73f51flg-a.singapore-postgres.render.com/codedb_2qoi" 
 
 # 兜底校验：防止URL为空
 if not SQLALCHEMY_DATABASE_URL:
