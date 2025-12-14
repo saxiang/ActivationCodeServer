@@ -55,10 +55,10 @@ class ActivationCode(Base):
 Base.metadata.create_all(bind=engine)
 
 # ---------------------- 工具函数（新增：统一响应函数，强制UTF-8） ----------------------
-def utf8_response(data: dict):
-    """统一返回UTF-8编码的JSON响应，解决iOS中文乱码"""
+def utf8_response(data: dict, status_code: int = 200):
     return JSONResponse(
         content=data,
+        status_code=status_code, 
         headers={
             "Content-Type": "application/json; charset=utf-8",  # 强制指定UTF-8
             "Access-Control-Allow-Headers": "*",
@@ -107,7 +107,12 @@ def decrypt_code(encrypt_code: str) -> tuple:
         raise ValueError(f"解密失败：{str(e)}")
 
 # ---------------------- FastAPI + 跨域配置（强化UTF-8兼容） ----------------------
-app = FastAPI(title="激活码管理系统", docs_url="/docs")
+app = FastAPI(
+    title="激活码管理系统",
+    docs_url="/docs",        # 原生Swagger UI路径
+    redoc_url="/redoc",      # 可选：Redoc文档路径
+    openapi_url="/openapi.json"  # 接口文档数据路径
+)
 
 origins = [
     "https://3guys.com.cn",       # 后端域名
@@ -130,8 +135,21 @@ app.add_middleware(
 # 第二步：全局中间件（强制添加跨域头，兜底）
 @app.middleware("http")
 async def add_cors_headers(request, call_next):
+    # 【步骤1：统一缩进为4个空格（和Python规范一致）】
+    # 放开Swagger相关路径：/openapi.json、/docs、/swagger-ui
+    swagger_paths = ["/openapi.json", "/docs", "/swagger-ui"]
+    if any(request.url.path.startswith(path) for path in swagger_paths):
+        # 分支内缩进保持4个空格
+        response = await call_next(request)
+        # 给Swagger相关响应加跨域头
+        response.headers["Access-Control-Allow-Origin"] = "*"
+        response.headers["Access-Control-Allow-Methods"] = "*"
+        response.headers["Access-Control-Allow-Headers"] = "*"
+        return response
+    
+    # 【步骤2：原有业务逻辑的缩进和if分支一致（4个空格）】
     response = await call_next(request)
-    # 强制指定允许login.3guys.com.cn跨域
+    # 原有业务接口的跨域逻辑
     response.headers["Access-Control-Allow-Origin"] = "https://login.3guys.com.cn"
     response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS, DELETE, PUT"
     response.headers["Access-Control-Allow-Headers"] = "*"
@@ -167,10 +185,10 @@ def init_admin(db: Session = Depends(get_db)):
             )
         db.commit()
         return utf8_response({"msg": "管理员账号创建成功! 账号：c/a/z"})
-    except Exception as e:  # 替换IntegrityError为通用异常（简化）
-        return utf8_response({"msg": f"管理员账号已存在或创建失败：{str(e)}"})
+    except Exception as e: 
+        return utf8_response({"msg": f"管理员账号已存在或创建失败：{str(e)}"}, status_code=400)
 
-# 修复login接口
+# login接口
 @app.post("/login")
 async def login(request: Request, db: Session = Depends(get_db)):
     # 步骤1：解析参数（兼容Form/JSON），空值直接返回失败
@@ -184,40 +202,41 @@ async def login(request: Request, db: Session = Depends(get_db)):
             username = data.get("username", "").strip()
             password = data.get("password", "").strip()
         except:
-            # 保留utf8_response，直接返回失败（终止流程）
-            return utf8_response({"detail": "参数格式错误（仅支持Form/JSON）"})
+            # 【改动4】：参数格式错误返回401（未授权）
+            return utf8_response({"detail": "参数格式错误（仅支持Form/JSON）"}, status_code=401)
     
     # 步骤2：空值校验（终止流程）
     if not username or not password:
-        return utf8_response({"detail": "账号/密码不能为空"})
+        
+        return utf8_response({"detail": "账号/密码不能为空"}, status_code=401)
     
-    # 步骤3：查询用户（账号不存在则返回失败，终止流程）
+
     user = db.execute(
         text("SELECT id, username, password_hash FROM admin_users WHERE username = :un"),
         {"un": username}
     ).first()
     if not user:
-        return utf8_response({"detail": "账号不存在"})
+        return utf8_response({"detail": "账号不存在"}, status_code=401)
     
     # 步骤4：密码校验（失败则返回失败，终止流程）
     # user[2] 是数据库中存储的密码哈希值
     password_hash = user[2]
     if not bcrypt.checkpw(password.encode("utf-8"), password_hash.encode("utf-8")):
-        # 密码错误：仅返回utf8_response，不执行后续逻辑
-        return utf8_response({"detail": "密码错误"})
+    
+        return utf8_response({"detail": "密码错误"}, status_code=401)
     
     # 步骤5：只有所有校验通过，才返回token（唯一成功分支）
-    return utf8_response({"access_token": username, "token_type": "bearer"})
+    return utf8_response({"access_token": username, "token_type": "bearer"}, status_code=200)
 
 # 生成激活码接口（自定义加密逻辑）
 @app.post("/generate_codes")
 def generate_codes(product_id: str = Form(...), phone: str = Form(...), db: Session = Depends(get_db)):
     # 校验产品编号（3位数字）
     if not product_id.isdigit() or len(product_id) != 3:
-        return utf8_response({"detail": "产品编号必须为3位数字"}), 400
+        return utf8_response({"detail": "产品编号必须为3位数字"}, status_code=400)
     # 校验手机号（11位数字）
     if not phone.isdigit() or len(phone) != 11:
-        return utf8_response({"detail": "手机号码必须为11位数字"}), 400
+        return utf8_response({"detail": "手机号码必须为11位数字"}, status_code=400)
     
     # 生成加密激活码
     final_code, raw_str = encrypt_code(product_id, phone)
@@ -228,7 +247,7 @@ def generate_codes(product_id: str = Form(...), phone: str = Form(...), db: Sess
         {"c": final_code}
     ).first()
     if exist:
-        return utf8_response({"detail": "该激活码已存在"}), 400
+        return utf8_response({"detail": "该激活码已存在"}, status_code=400)
     
     # 修复：插入数据也用execute + text()，时间格式化避免乱码
     current_time = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
@@ -253,16 +272,16 @@ def decrypt_code_api(code: str = Form(...)):
         product_id, phone = decrypt_code(code)
         return utf8_response({"product_id": product_id, "phone": phone, "msg": "解密成功"})
     except ValueError as e:
-        return utf8_response({"detail": str(e)}), 400
+        return utf8_response({"detail": str(e)}, status_code=400)
 
 # 3. 验证激活码接口（iOS App调用）
 @app.get("/verify_code")
 def verify_code(code: str, db: Session = Depends(get_db)):
     ac = db.query(ActivationCode).filter(ActivationCode.code == code).first()
     if not ac:
-        return utf8_response({"status": False, "msg": "激活码不存在"})
+        return utf8_response({"status": False, "msg": "激活码不存在"}, status_code=404)
     if ac.is_activated:
-        return utf8_response({"status": False, "msg": "激活码已使用"})
+        return utf8_response({"status": False, "msg": "激活码已使用"}, status_code=400)
     return utf8_response({"status": True, "msg": "激活码有效"})
 
 # 4. 激活激活码接口（兼容GET/POST，UTF-8响应）
@@ -270,14 +289,15 @@ def verify_code(code: str, db: Session = Depends(get_db)):
 def activate_code(code: str, db: Session = Depends(get_db)):
     ac = db.query(ActivationCode).filter(ActivationCode.code == code).first()
     if not ac:
-        return utf8_response({"detail": "激活码不存在"}), 404
+        return utf8_response({"detail": "激活码不存在"}, status_code=404)
     if ac.is_activated:
-        return utf8_response({"detail": "激活码已激活"}), 400
+        return utf8_response({"detail": "激活码已激活"}, status_code=400)
     # 标记为已激活，时间强制UTC+8
     ac.is_activated = True
     ac.activate_time = datetime.datetime.now(datetime.timezone.utc)
     db.commit()
     db.refresh(ac)
+    # 激活成功返回200（默认）
     return utf8_response({"status": True, "msg": "激活成功"})
 
 # 5.重置激活状态接口
@@ -286,18 +306,18 @@ def reset_activation(code: str = Form(...), db: Session = Depends(get_db)):
     # 1. 根据激活码字符串查询
     activation_code = db.query(ActivationCode).filter(ActivationCode.code == code).first()
     if not activation_code:
-        return utf8_response({"detail": "激活码不存在"}), 400
+        return utf8_response({"detail": "激活码不存在"}, status_code=400)
     
     # 2. 校验是否为已激活状态
     if not activation_code.is_activated:
-        return utf8_response({"detail": "该激活码已是未激活状态，无需重置"}), 400
+        return utf8_response({"detail": "该激活码已是未激活状态，无需重置"}, status_code=400)
     
     # 3. 重置状态：未激活 + 清空激活时间
     activation_code.is_activated = False
     activation_code.activate_time = None
     db.commit()
     db.refresh(activation_code)
-    
+
     return utf8_response({"msg": f"激活码【{code}】已重置为未激活状态", "code": code})
 
 # 6.删除激活码接口
@@ -306,16 +326,17 @@ def delete_code(code: str = Form(...), db: Session = Depends(get_db)):
     # 1. 校验激活码是否存在
     activation_code = db.query(ActivationCode).filter(ActivationCode.code == code).first()
     if not activation_code:
-        return utf8_response({"detail": "激活码不存在"}), 400
+        return utf8_response({"detail": "激活码不存在"}, status_code=400)
     
     # 2. 可选：禁止删除已激活的激活码（根据业务需求调整，如需允许则注释此行）
     if activation_code.is_activated:
-        return utf8_response({"detail": "禁止删除已激活的激活码"}), 400
+        return utf8_response({"detail": "禁止删除已激活的激活码"}, status_code=403)
     
     # 3. 删除激活码
     db.delete(activation_code)
     db.commit()
     
+    # 删除成功返回200（默认）
     return utf8_response({"msg": f"激活码【{code}】已成功删除"})
 
 # 获取激活码列表（修复时间格式化乱码）
@@ -349,7 +370,7 @@ def get_codes(page: int = 1, size: int = 10, db: Session = Depends(get_db)):
         return utf8_response({"total": total, "list": data})
     except Exception as e:
         print(f"get_codes错误：{str(e)}")
-        return utf8_response({"detail": f"查询失败：{str(e)}"}), 500
+        return utf8_response({"detail": f"查询失败：{str(e)}"}, status_code=500)
 
 # 退出登录（空接口，前端处理）
 @app.get("/logout")
