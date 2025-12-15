@@ -84,8 +84,10 @@ Base.metadata.create_all(bind=engine)
 
 # ---------------------- 工具函数（新增：统一响应函数，强制UTF-8） ----------------------
 def utf8_response(data: dict, status_code: int = 200):
+    response_data = data.copy()
+    response_data["code"] = status_code
     return JSONResponse(
-        content=data,
+        content=response_data,
         status_code=status_code, 
         headers={
             "Content-Type": "application/json; charset=utf-8",  # 强制指定UTF-8
