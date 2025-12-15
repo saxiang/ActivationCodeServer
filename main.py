@@ -321,7 +321,7 @@ def activate_code(code: str, db: Session = Depends(get_db)):
     if not ac:
         return utf8_response({"msg": "激活码不存在"}, status_code=404)
     if ac.is_activated:
-        return utf8_response({"msg": "激活码已激活"}, status_code=400)
+        return utf8_response({"msg": "激活码已被激活过！"}, status_code=400)
     # 标记为已激活，时间强制UTC+8
     ac.is_activated = True
     beijing_tz = datetime.timezone(datetime.timedelta(hours=8))  # 东八区时区对象
