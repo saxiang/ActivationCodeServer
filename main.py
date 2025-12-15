@@ -311,19 +311,19 @@ def decrypt_code_api(code: str = Form(...)):
 def verify_code(code: str, db: Session = Depends(get_db)):
     ac = db.query(ActivationCode).filter(ActivationCode.code == code).first()
     if not ac:
-        return utf8_response({"status": False, "msg": "激活码不存在"}, status_code=404)
+        return utf8_response({"status": "no", "msg": "激活码不存在"}, status_code=404)
     if ac.is_activated:
-        return utf8_response({"status": False, "msg": "激活码已使用"}, status_code=400)
-    return utf8_response({"status": True, "msg": "激活码有效"})
+        return utf8_response({"status": "no", "msg": "激活码已使用"}, status_code=400)
+    return utf8_response({"status": "ok", "msg": "激活码有效"})
 
 # 4. 激活激活码接口（兼容GET/POST，UTF-8响应）
 @app.api_route("/activate_code", methods=["GET", "POST"])
 def activate_code(code: str, db: Session = Depends(get_db)):
     ac = db.query(ActivationCode).filter(ActivationCode.code == code).first()
     if not ac:
-        return utf8_response({"msg": "激活码不存在"}, status_code=404)
+        return utf8_response({"status": "no","msg": "激活码不存在"}, status_code=404)
     if ac.is_activated:
-        return utf8_response({"msg": "激活码已被激活过！"}, status_code=400)
+        return utf8_response({"status": "no","msg": "激活码已被激活过！"}, status_code=400)
     # 标记为已激活，时间强制UTC+8
     ac.is_activated = True
     beijing_tz = datetime.timezone(datetime.timedelta(hours=8))  # 东八区时区对象
@@ -332,7 +332,7 @@ def activate_code(code: str, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(ac)
     # 激活成功返回200（默认）
-    return utf8_response({"status": True, "msg": "激活成功"})
+    return utf8_response({"status": "ok", "msg": "激活成功"})
 
 # 5.重置激活状态接口
 @app.post("/reset_activation")  
@@ -352,7 +352,7 @@ def reset_activation(code: str = Form(...), db: Session = Depends(get_db)):
     db.commit()
     db.refresh(activation_code)
 
-    return utf8_response({"msg": f"激活码【{code}】已重置为未激活状态", "code": code})
+    return utf8_response({"status": "ok","msg": f"激活码【{code}】已重置为未激活状态", "code": code})
 
 # 6.删除激活码接口
 @app.post("/delete_code")
@@ -371,7 +371,7 @@ def delete_code(code: str = Form(...), db: Session = Depends(get_db)):
     db.commit()
     
     # 删除成功返回200（默认）
-    return utf8_response({"msg": f"激活码【{code}】已成功删除"})
+    return utf8_response({"status": "ok","msg": f"激活码【{code}】已成功删除"})
 
 # 获取激活码列表（修复时间格式化乱码）
 @app.get("/get_codes")
@@ -401,7 +401,7 @@ def get_codes(page: int = 1, size: int = 10, db: Session = Depends(get_db)):
                 "activate_time": format_datetime(c[4]),
                 "create_time": format_datetime(c[5])
             })
-        return utf8_response({"total": total, "list": data})
+        return utf8_response({"status": "ok","total": total, "list": data})
     except Exception as e:
         print(f"get_codes错误：{str(e)}")
         return utf8_response({"msg": f"查询失败：{str(e)}"}, status_code=500)
@@ -409,7 +409,7 @@ def get_codes(page: int = 1, size: int = 10, db: Session = Depends(get_db)):
 # 退出登录（空接口，前端处理）
 @app.get("/logout")
 def logout():
-    return utf8_response({"msg": "退出成功"})
+    return utf8_response({"status": "ok","msg": "退出成功"})
 
 # 测试接口：验证服务是否正常
 @app.get("/health")
