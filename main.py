@@ -231,12 +231,12 @@ async def login(request: Request, db: Session = Depends(get_db)):
             password = data.get("password", "").strip()
         except:
             # 【改动4】：参数格式错误返回401（未授权）
-            return utf8_response({"detail": "参数格式错误（仅支持Form/JSON）"}, status_code=401)
+            return utf8_response({"msg": "参数格式错误（仅支持Form/JSON）"}, status_code=401)
     
     # 步骤2：空值校验（终止流程）
     if not username or not password:
         
-        return utf8_response({"detail": "账号/密码不能为空"}, status_code=401)
+        return utf8_response({"msg": "账号/密码不能为空"}, status_code=401)
     
 
     user = db.execute(
@@ -244,14 +244,14 @@ async def login(request: Request, db: Session = Depends(get_db)):
         {"un": username}
     ).first()
     if not user:
-        return utf8_response({"detail": "账号不存在"}, status_code=401)
+        return utf8_response({"msg": "账号不存在"}, status_code=401)
     
     # 步骤4：密码校验（失败则返回失败，终止流程）
     # user[2] 是数据库中存储的密码哈希值
     password_hash = user[2]
     if not bcrypt.checkpw(password.encode("utf-8"), password_hash.encode("utf-8")):
     
-        return utf8_response({"detail": "密码错误"}, status_code=401)
+        return utf8_response({"msg": "密码错误"}, status_code=401)
     
     # 步骤5：只有所有校验通过，才返回token（唯一成功分支）
     return utf8_response({"access_token": username, "token_type": "bearer"}, status_code=200)
@@ -261,10 +261,10 @@ async def login(request: Request, db: Session = Depends(get_db)):
 def generate_codes(product_id: str = Form(...), phone: str = Form(...), db: Session = Depends(get_db)):
     # 校验产品编号（3位数字）
     if not product_id.isdigit() or len(product_id) != 3:
-        return utf8_response({"detail": "产品编号必须为3位数字"}, status_code=400)
+        return utf8_response({"msg": "产品编号必须为3位数字"}, status_code=400)
     # 校验手机号（11位数字）
     if not phone.isdigit() or len(phone) != 11:
-        return utf8_response({"detail": "手机号码必须为11位数字"}, status_code=400)
+        return utf8_response({"msg": "手机号码必须为11位数字"}, status_code=400)
     
     # 生成加密激活码
     final_code, raw_str = encrypt_code(product_id, phone)
@@ -275,7 +275,7 @@ def generate_codes(product_id: str = Form(...), phone: str = Form(...), db: Sess
         {"c": final_code}
     ).first()
     if exist:
-        return utf8_response({"detail": "该激活码已存在"}, status_code=400)
+        return utf8_response({"msg": "该激活码已存在"}, status_code=400)
     
     # 修复：插入数据也用execute + text()，时间格式化避免乱码
     # current_time = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
@@ -302,7 +302,7 @@ def decrypt_code_api(code: str = Form(...)):
         product_id, phone = decrypt_code(code)
         return utf8_response({"product_id": product_id, "phone": phone, "msg": "解密成功"})
     except ValueError as e:
-        return utf8_response({"detail": str(e)}, status_code=400)
+        return utf8_response({"msg": str(e)}, status_code=400)
 
 # 3. 验证激活码接口（iOS App调用）
 @app.get("/verify_code")
@@ -319,9 +319,9 @@ def verify_code(code: str, db: Session = Depends(get_db)):
 def activate_code(code: str, db: Session = Depends(get_db)):
     ac = db.query(ActivationCode).filter(ActivationCode.code == code).first()
     if not ac:
-        return utf8_response({"detail": "激活码不存在"}, status_code=404)
+        return utf8_response({"msg": "激活码不存在"}, status_code=404)
     if ac.is_activated:
-        return utf8_response({"detail": "激活码已激活"}, status_code=400)
+        return utf8_response({"msg": "激活码已激活"}, status_code=400)
     # 标记为已激活，时间强制UTC+8
     ac.is_activated = True
     beijing_tz = datetime.timezone(datetime.timedelta(hours=8))  # 东八区时区对象
@@ -338,11 +338,11 @@ def reset_activation(code: str = Form(...), db: Session = Depends(get_db)):
     # 1. 根据激活码字符串查询
     activation_code = db.query(ActivationCode).filter(ActivationCode.code == code).first()
     if not activation_code:
-        return utf8_response({"detail": "激活码不存在"}, status_code=400)
+        return utf8_response({"msg": "激活码不存在"}, status_code=400)
     
     # 2. 校验是否为已激活状态
     if not activation_code.is_activated:
-        return utf8_response({"detail": "该激活码已是未激活状态，无需重置"}, status_code=400)
+        return utf8_response({"msg": "该激活码已是未激活状态，无需重置"}, status_code=400)
     
     # 3. 重置状态：未激活 + 清空激活时间
     activation_code.is_activated = False
@@ -358,11 +358,11 @@ def delete_code(code: str = Form(...), db: Session = Depends(get_db)):
     # 1. 校验激活码是否存在
     activation_code = db.query(ActivationCode).filter(ActivationCode.code == code).first()
     if not activation_code:
-        return utf8_response({"detail": "激活码不存在"}, status_code=400)
+        return utf8_response({"msg": "激活码不存在"}, status_code=400)
     
     # 2. 可选：禁止删除已激活的激活码（根据业务需求调整，如需允许则注释此行）
     if activation_code.is_activated:
-        return utf8_response({"detail": "禁止删除已激活的激活码"}, status_code=403)
+        return utf8_response({"msg": "禁止删除已激活的激活码"}, status_code=403)
     
     # 3. 删除激活码
     db.delete(activation_code)
@@ -402,7 +402,7 @@ def get_codes(page: int = 1, size: int = 10, db: Session = Depends(get_db)):
         return utf8_response({"total": total, "list": data})
     except Exception as e:
         print(f"get_codes错误：{str(e)}")
-        return utf8_response({"detail": f"查询失败：{str(e)}"}, status_code=500)
+        return utf8_response({"msg": f"查询失败：{str(e)}"}, status_code=500)
 
 # 退出登录（空接口，前端处理）
 @app.get("/logout")
