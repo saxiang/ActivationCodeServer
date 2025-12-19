@@ -304,7 +304,7 @@ def generate_codes(product_id: str = Form(...), phone: str = Form(...), db: Sess
         }
     )
     db.commit()
-    return utf8_response({"code": final_code, "msg": "激活码生成成功"})
+    return utf8_response({"actcode": final_code, "msg": "激活码生成成功"})
 
 # 解密激活码接口
 @app.post("/decrypt_code")
