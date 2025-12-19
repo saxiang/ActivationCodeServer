@@ -12,7 +12,7 @@ import bcrypt
 import datetime
 import uuid
 
-# 【DB改动1】：新增PostgreSQL兼容的时区处理（可选，避免时间差）
+# PostgreSQL兼容的时区处理（可选，避免时间差）
 from sqlalchemy.sql import func
 import os
 
@@ -32,7 +32,7 @@ def format_datetime(dt):
 # ---------------------- 数据库配置（修复：删除无效的encoding参数） ----------------------
 # 保留charset=utf8确保SQLite读写中文UTF-8编码，删除create_engine的encoding参数
 # SQLALCHEMY_DATABASE_URL = "sqlite:///./db.sqlite3?charset=utf8"
-# 【db改动2】：替换为Render PostgreSQL的Internal Database URL（注意替换成你自己的！）
+# 
 SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL")
 
 # 本地开发兜底（仅本地生效，Render部署时不会执行这行）
@@ -61,7 +61,7 @@ class AdminUser(Base):  # 新增：管理员表模型
     id = Column(Integer, primary_key=True, index=True)
     # username = Column(String, unique=True, nullable=False)
     # password_hash = Column(String, nullable=False)
-     # 【db改动5】：PostgreSQL的String建议指定长度（避免默认无限长度）
+    #
     username = Column(String(50), unique=True, nullable=False)
     password_hash = Column(String(255), nullable=False)
 
@@ -71,8 +71,8 @@ class ActivationCode(Base):
     id = Column(Integer, primary_key=True, index=True)
     # code = Column(String, unique=True, index=True)  # 存储最终加密后的激活码
     # raw_data = Column(String)  # 存储原始拼接字符串（产品编号+手机号），方便解密
-    code = Column(String(255), unique=True, index=True)  # 【db改动6】：指定长度
-    raw_data = Column(String(255))  # 【db改动7】：指定长度
+    code = Column(String(255), unique=True, index=True) 
+    raw_data = Column(String(255))
     is_activated = Column(Boolean, default=False)
     activate_time = Column(DateTime, nullable=True)
     # 核心修改：datetime默认值强制UTC+8，格式化避免乱码
@@ -80,6 +80,13 @@ class ActivationCode(Base):
     # 【改动8】：PostgreSQL推荐用func.now()作为默认时间（兼容时区）
     create_time = Column(DateTime, default=func.now())
 
+class ProductInfo(Base):
+    __tablename__ = "product_info" 
+    id = Column(Integer, primary_key=True, index=True)
+    # 网址字段：VARCHAR(512)适配长网址，允许为空（DEFAULT NULL）
+    guide_link = Column(String(512), nullable=True)
+    feishu_link = Column(String(512), nullable=True)
+    shortcut_link = Column(String(512), nullable=True)
 Base.metadata.create_all(bind=engine)
 
 # ---------------------- 工具函数（新增：统一响应函数，强制UTF-8） ----------------------
