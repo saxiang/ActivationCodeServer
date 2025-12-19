@@ -422,3 +422,18 @@ def logout():
 @app.get("/health")
 def health():
     return utf8_response({"status": "ok", "msg": "服务正常运行"})
+
+@app.get("/get_product_info")
+def get_product_info(id: int, db: Session = Depends(get_db)):
+    info = db.query(ProductInfo).filter(ProductInfo.id == id).first()
+    if not info:
+        return utf8_response({"msg": "产品信息不存在"}, status_code=404)
+    return utf8_response({
+        "status": "ok",
+        "data": {
+            "id": info.id,
+            "guide_link": info.guide_link or "",
+            "feishu_link": info.feishu_link or "",
+            "shortcut_link": info.shortcut_link or ""
+        }
+    })
