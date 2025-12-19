@@ -154,7 +154,9 @@ app = FastAPI(
 origins = [
     "https://3guys.com.cn",       # 后端域名
     "https://login.3guys.com.cn", # 前端登录页域名
+    "https://getlink.3guys.com.cn",
     "http://localhost:8080",      # 本地开发环境（可选）
+    "http://127.0.0.1:8080",
     "http://192.168.3.111:8080"       # 本地开发环境（可选）
 ]
 
@@ -170,29 +172,29 @@ app.add_middleware(
 )
 
 # 第二步：全局中间件（强制添加跨域头，兜底）
-@app.middleware("http")
-async def add_cors_headers(request, call_next):
-    # 【步骤1：统一缩进为4个空格（和Python规范一致）】
-    # 放开Swagger相关路径：/openapi.json、/docs、/swagger-ui
-    swagger_paths = ["/openapi.json", "/docs", "/swagger-ui"]
-    if any(request.url.path.startswith(path) for path in swagger_paths):
-        # 分支内缩进保持4个空格
-        response = await call_next(request)
-        # 给Swagger相关响应加跨域头
-        response.headers["Access-Control-Allow-Origin"] = "*"
-        response.headers["Access-Control-Allow-Methods"] = "*"
-        response.headers["Access-Control-Allow-Headers"] = "*"
-        return response
+# @app.middleware("http")
+# async def add_cors_headers(request, call_next):
+#     # 【步骤1：统一缩进为4个空格（和Python规范一致）】
+#     # 放开Swagger相关路径：/openapi.json、/docs、/swagger-ui
+#     swagger_paths = ["/openapi.json", "/docs", "/swagger-ui"]
+#     if any(request.url.path.startswith(path) for path in swagger_paths):
+#         # 分支内缩进保持4个空格
+#         response = await call_next(request)
+#         # 给Swagger相关响应加跨域头
+#         response.headers["Access-Control-Allow-Origin"] = "*"
+#         response.headers["Access-Control-Allow-Methods"] = "*"
+#         response.headers["Access-Control-Allow-Headers"] = "*"
+#         return response
     
-    # 【步骤2：原有业务逻辑的缩进和if分支一致（4个空格）】
-    response = await call_next(request)
-    # 原有业务接口的跨域逻辑
-    response.headers["Access-Control-Allow-Origin"] = "https://login.3guys.com.cn"
-    response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS, DELETE, PUT"
-    response.headers["Access-Control-Allow-Headers"] = "*"
-    response.headers["Access-Control-Allow-Credentials"] = "true"
-    response.headers["Content-Type"] = "application/json; charset=utf-8"
-    return response
+#     # 【步骤2：原有业务逻辑的缩进和if分支一致（4个空格）】
+#     response = await call_next(request)
+#     # 原有业务接口的跨域逻辑
+#     response.headers["Access-Control-Allow-Origin"] = "https://login.3guys.com.cn"
+#     response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS, DELETE, PUT"
+#     response.headers["Access-Control-Allow-Headers"] = "*"
+#     response.headers["Access-Control-Allow-Credentials"] = "true"
+#     response.headers["Content-Type"] = "application/json; charset=utf-8"
+#     return response
 
 # 在CORS配置后新增：处理所有OPTIONS预检请求，返回UTF-8编码
 @app.options("/{path:path}")
