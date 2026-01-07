@@ -154,9 +154,10 @@ app = FastAPI(
 origins = [
     "https://3guys.com.cn",       # 后端域名
     "https://login.3guys.com.cn", # 前端登录页域名
-    "https://getlink.3guys.com.cn",
+    "https://link.3guys.com.cn",
     "http://localhost:8080",      # 本地开发环境（可选）
     "http://127.0.0.1:8080",
+    "http://127.0.0.1:8000",
     "http://192.168.3.111:8080"       # 本地开发环境（可选）
 ]
 
@@ -324,6 +325,55 @@ def verify_code(code: str, db: Session = Depends(get_db)):
     if ac.is_activated:
         return utf8_response({"status": "no", "msg": "激活码已使用"}, status_code=400)
     return utf8_response({"status": "ok", "msg": "激活码有效"})
+
+# 【最终修正】：激活码验证接口（仅需actcode入参）
+@app.post("/verify_actcode")
+def verify_actcode(
+    actcode: str = Form(...), 
+    db: Session = Depends(get_db)
+):
+    # 1. 基础参数校验（仅校验激活码）
+    if not actcode:
+        return utf8_response({
+            "msg": "激活码不能为空",
+            "query_count": 0,
+            "remaining_count": 3,
+            "is_valid": False
+        }, status_code=400)
+    
+    # 2. 查询激活码记录
+    ac = db.query(ActivationCode).filter(ActivationCode.code == actcode).first()
+    
+    # 3. 激活码不存在：不消耗查询次数
+    if not ac:
+        return utf8_response({
+            "msg": "激活码不存在",
+            "query_count": 0,
+            "remaining_count": 3,
+            "is_valid": False
+        }, status_code=200)
+    
+    # 4. 激活码存在但查询次数已用尽（≥3次）
+    if ac.query_count >= 3:
+        return utf8_response({
+            "msg": "该激活码查询次数已用尽（最多3次）",
+            "query_count": 3,
+            "remaining_count": 0,
+            "is_valid": False
+        }, status_code=403)
+    
+    # 5. 验证成功：激活码存在 + 查询次数<3，记录查询次数
+    ac.query_count += 1
+    db.commit()
+    db.refresh(ac)
+    
+    # 6. 返回成功响应
+    return utf8_response({
+        "msg": "激活码验证成功",
+        "query_count": ac.query_count,
+        "remaining_count": 3 - ac.query_count,
+        "is_valid": True
+    }, status_code=200)
 
 # 4. 激活激活码接口（兼容GET/POST，UTF-8响应）
 @app.api_route("/activate_code", methods=["GET", "POST"])
