@@ -79,6 +79,8 @@ class ActivationCode(Base):
     # create_time = Column(DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc))
     # 【改动8】：PostgreSQL推荐用func.now()作为默认时间（兼容时区）
     create_time = Column(DateTime, default=func.now())
+    #查询次数字段
+    query_count = Column(Integer, default=0, nullable=False, index=True)
 
 class ProductInfo(Base):
     __tablename__ = "product_info" 
@@ -412,6 +414,70 @@ def reset_activation(code: str = Form(...), db: Session = Depends(get_db)):
     db.refresh(activation_code)
 
     return utf8_response({"status": "ok","msg": f"激活码【{code}】已重置为未激活状态", "code": code})
+
+@app.post("/reset_query_count", summary="重置激活码查询次数为0")
+def reset_query_count(
+    actcode: str = Form(..., description="需要重置的激活码"),
+    db: Session = Depends(get_db)
+):
+    """
+    重置指定激活码的查询次数为0
+    - 参数：actcode - 激活码字符串（32位）
+    - 返回：包含状态码、提示信息、重置后次数的JSON
+    """
+    # 1. 查询激活码是否存在
+    ac = db.query(ActivationCode).filter(ActivationCode.code == actcode).first()
+    
+    if not ac:
+        return {
+            "code": 404,
+            "msg": "激活码不存在",
+            "is_success": False,
+            "query_count": 0
+        }
+    
+    # 2. 重置查询次数为0
+    ac.query_count = 0
+    db.commit()
+    db.refresh(ac)  # 刷新数据，确保返回最新值
+    
+    # 3. 返回成功结果
+    return {
+        "code": 200,
+        "msg": "激活码查询次数重置成功",
+        "is_success": True,
+        "query_count": ac.query_count  # 重置后的值（0）
+    }
+
+# ---------------------- 原有接口（示例） ----------------------
+# 验证激活码接口（已适配query_count）
+@app.post("/verify_actcode")
+def verify_actcode(actcode: str = Form(...), db: Session = Depends(get_db)):
+    ac = db.query(ActivationCode).filter(ActivationCode.code == actcode).first()
+    
+    if not ac:
+        return {"code": 200, "msg": "激活码不存在", "is_valid": False}
+    
+    if ac.query_count >= 3:
+        return {
+            "code": 200,
+            "msg": "该激活码查询次数已用尽",
+            "is_valid": False,
+            "query_count": ac.query_count,
+            "remaining_count": 0
+        }
+    
+    ac.query_count += 1
+    db.commit()
+    db.refresh(ac)
+    
+    return {
+        "code": 200,
+        "msg": "激活码验证成功",
+        "is_valid": True,
+        "query_count": ac.query_count,
+        "remaining_count": 3 - ac.query_count
+    }
 
 # 6.删除激活码接口
 @app.post("/delete_code")
