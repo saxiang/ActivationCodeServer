@@ -437,7 +437,7 @@ def delete_code(
 
 # 获取激活码列表
 @app.get("/get_codes")
-def get_codes(page: int = 1, size: int = 10, db: Session = Depends(get_db)):
+def get_codes(page: int = 1, size: int = 20, db: Session = Depends(get_db)):
     try:
         page = max(1, page)
         size = max(1, min(100, size))
@@ -460,7 +460,9 @@ def get_codes(page: int = 1, size: int = 10, db: Session = Depends(get_db)):
                 "raw_data": c[2] if c[2] else "",
                 "is_activated": bool(c[3]) if c[3] is not None else False,
                 "activate_time": format_datetime(c[4]),
-                "create_time": format_datetime(c[5])
+                "create_time": format_datetime(c[5]),
+                # 2. 确认赋值正确（c[6] 对应SQL中的 query_count 列）
+                "query_count": c[6] if c[6] is not None else 0
             })
         return utf8_response({"status": "ok","total": total, "list": data})
     except Exception as e:
