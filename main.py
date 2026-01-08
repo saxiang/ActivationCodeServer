@@ -444,8 +444,9 @@ def get_codes(page: int = 1, size: int = 10, db: Session = Depends(get_db)):
         total = db.execute(text("SELECT COUNT(*) FROM activation_codes")).scalar() or 0
         codes = db.execute(
             text("""
-                SELECT id, code, raw_data, is_activated, activate_time, create_time
+                SELECT id, code, raw_data, is_activated, activate_time, create_time, query_count
                 FROM activation_codes
+                ORDER BY create_time DESC
                 LIMIT :size OFFSET :offset
             """),
             {"size": size, "offset": (page-1)*size}
